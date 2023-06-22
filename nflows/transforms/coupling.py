@@ -225,8 +225,14 @@ class AffineCouplingTransform(CouplingTransform):
     GENERAL_SCALE_ACTIVATION = lambda x : (softplus(x) + 1e-3).clamp(0, 3)
 
     def __init__(self, mask, transform_net_create_fn, unconditional_transform=None, scale_activation=DEFAULT_SCALE_ACTIVATION):
-        self.scale_activation = scale_activation
+        #self.scale_activation = scale_activation
         super().__init__(mask, transform_net_create_fn, unconditional_transform)
+        self.scaling_factor = torch.nn.Parameter(torch.zeros(1, self.num_transform_features))
+
+    def scale_activation(self, x):
+        s_fac = self.scaling_factor.exp().view(1, -1)
+        scale = torch.tanh(x / s_fac) * s_fac
+        return scale
 
     def _transform_dim_multiplier(self):
         return 2
@@ -239,15 +245,16 @@ class AffineCouplingTransform(CouplingTransform):
 
     def _coupling_transform_forward(self, inputs, transform_params):
         scale, shift = self._scale_and_shift(transform_params)
-        log_scale = torch.log(scale)
+        log_scale = scale.clone()
+        scale = torch.exp(scale)
         outputs = inputs * scale + shift
         logabsdet = torchutils.sum_except_batch(log_scale, num_batch_dims=1)
         return outputs, logabsdet
 
     def _coupling_transform_inverse(self, inputs, transform_params):
         scale, shift = self._scale_and_shift(transform_params)
-        log_scale = torch.log(scale)
-        outputs = (inputs - shift) / scale
+        log_scale = scale.clone()
+        outputs = (inputs - shift) * torch.exp(-log_scale)
         logabsdet = -torchutils.sum_except_batch(log_scale, num_batch_dims=1)
         return outputs, logabsdet
 
